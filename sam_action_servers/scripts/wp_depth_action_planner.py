@@ -33,7 +33,7 @@ from visualization_msgs.msg import Marker
 from tf.transformations import quaternion_from_euler
 from toggle_controller import ToggleController  
 import time   
-from sam_action_servers.msg import line
+#from sam_action_servers.msg import line
 import sys
 
 
@@ -184,7 +184,7 @@ class WPDepthPlanner(object):
 
     def check_success(self, position_feedback, nav_goal):
         start_pos = np.array(position_feedback)
-        end_pos = np.array([nav_goal.pose.position.x, nav_goal.pose.position.y, nav_goal.pose.position.z])
+        end_pos = np.array([nav_goal.position.x, nav_goal.position.y, nav_goal.position.z])
 
         # We check for success out of the main control loop in case the main control loop is
         # running at 300Hz or sth. like that. We dont need to check succes that frequently.
@@ -199,12 +199,13 @@ class WPDepthPlanner(object):
         #rospy.loginfo_throttle_identical(5, "Using Crosstrack Error")
         rospy.loginfo_throttle_identical(5, "diff xy:"+ str(xydiff_norm)+' z:' + str(zdiff)+ " WP tol:"+ str(self.wp_tolerance)+ "Depth tol:"+str(self.depth_tolerance))
         if xydiff_norm < self.wp_tolerance and zdiff < self.depth_tolerance:
-            rospy.loginfo("Reached WP!")
-            self.x_prev = self.nav_goal.pose.position.x
-            self.y_prev = self.nav_goal.pose.position.y
+            rospy.loginfo("Reached WP___check success!")
+            self.x_prev = self.nav_goal.position.x
+            self.y_prev = self.nav_goal.position.y
             self.nav_goal = None
             self._result.reached_waypoint= True
             #self._as.set_succeeded(self._result, "Reached WP")
+
 
         #consider timeout
         current_time = time.time()
@@ -267,11 +268,9 @@ class WPDepthPlanner(object):
         self.rpm1_pub.publish(rpm1)
         self.rpm2_pub.publish(rpm2)
         
-    def get_marker3_pose(self, msg):
     
-        self.marker3_pose = msg
-    
-    def execute_cb(self, goal):
+
+    def execute_cb_new(self, goal):
 
         rospy.loginfo("Goal received")
         self.start_time = time.time()
@@ -280,15 +279,23 @@ class WPDepthPlanner(object):
         
         #print >>sys.stderr,'marker3_pose "%s"'  % self.marker3_pose
 
-        self.nav_goal = PoseStamped()
-        self.nav_goal.pose.position.x =self.marker3_pose.x
-        self.nav_goal.pose.position.y =self.marker3_pose.y
-        self.nav_goal.pose.position.z =self.marker3_pose.z
+        if self.intercepts_pose == None:
+            self.nav_goal = PoseStamped()
+            self.nav_goal.pose.position.x =self.marker3_pose.x
+            self.nav_goal.pose.position.y =self.marker3_pose.y
+            self.nav_goal.pose.position.z =self.marker3_pose.z
+            rospy.loginfo("nav_goal marker:"+str(self.nav_goal.pose))
+        #else:
+        #    self.nav_goal = PoseStamped()
+        #    self.nav_goal.pose.position.x =self.intercepts_pose.x
+        #    self.nav_goal.pose.position.y =self.intercepts_pose.y
+        #    self.nav_goal.pose.position.z =self.intercepts_pose.z
+        #    rospy.loginfo("nav_goal intercept:"+str(self.nav_goal.pose))
         #self.nav_goal.header.frame_id = self.marker3_pose.frame_id
         
 
         
-        rospy.loginfo("nav_goal:"+str(self.nav_goal.pose))
+        #rospy.loginfo("nav_goal:"+str(self.nav_goal.pose))
         self.nav_goal_frame = self.nav_goal.header.frame_id
         if self.nav_goal_frame is None or self.nav_goal_frame == '':
             rospy.logwarn("Goal has no frame id! Using utm by default")
@@ -476,7 +483,7 @@ class WPDepthPlanner(object):
         rospy.loginfo('%s: Succeeded' % self._action_name)
         self._as.set_succeeded(self._result,"WP Reached")
 
-    def execute_cb_new(self, goal):
+    def execute_cb(self, goal):
     
         rospy.loginfo("Goal received")
         self.start_time = time.time()
@@ -741,8 +748,15 @@ class WPDepthPlanner(object):
 
         self.listener = tf.TransformListener()
         #rospy.Timer(rospy.Duration(0.5), self.timer_callback)
-        self.marked_3_sub = rospy.Subscriber('/sam/sim/marker3', line, self.get_marker3_pose)
-        self.marker3_pose = None
+        #self.marked_3_sub = rospy.Subscriber('/sam/sim/marker3', line, self.get_marker3_pose)
+        #self.marker3_pose = None
+
+
+        #self.marked_1_sub = rospy.Subscriber('/sam/sim/marker1', line, self.get_marker1_pose)
+        #self.marker1_pose = None
+
+        #self.intercepts_sub = rospy.Subscriber('/sam/sim/intercepts_utm', line, self.get_intercepts_pose)
+        #self.intercepts_pose = None
 
         self.yaw_feedback = 0.0
         rospy.Subscriber(yaw_feedback_topic, Float64, self.yaw_feedback_cb)

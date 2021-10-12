@@ -58,7 +58,13 @@ Z_HEIGHT = 3
 # a list of actions that we will consider
 # as the imc 'executing' state
 EXECUTING_ACTION_NAMES =[
+    'A_ReadMarker1',
+    'A_ReadMarker3',
+    'A_ReadIntercepts',
+    'A_ReadPredictedIntercepts',
+    'A_FollowWaypoint',
     'A_GotoWaypoint',
+
     'A_FollowLeader',
     'A_SetNextPlanAction' #so we dont spam service/maneuver when going tru a lot of waypoints quickly
 ]

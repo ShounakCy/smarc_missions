@@ -74,13 +74,11 @@
   <exec_depend>tf</exec_depend>
   <exec_depend>rospy</exec_depend>
   <exec_depend>actionlib</exec_depend>
-  <exec_depend>message_runtime</exec_depend>
   <!-- <exec_depend>uuv_gazebo_ros_plugins_msgs</exec_depend> -->
   <!--depend>sam_msgs</depend>
   <depend>smarc_msgs</depend-->
   <!--depend>std_srvs</depend-->
   <depend>ddynamic_reconfigure_python</depend>
-  
 
   <!-- The export tag contains other, unspecified, tags -->
   <export>

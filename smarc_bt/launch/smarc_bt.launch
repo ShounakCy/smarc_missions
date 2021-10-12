@@ -57,6 +57,13 @@
 	<arg name="lolo_aft_tank_topic" default="/lolo/core/vbs/aft_tank_fb" />
 	<arg name="lolo_front_tank_topic" default="/lolo/core/vbs/front_tank_fb" />
 
+	<arg name="marker3_topic" default="sim/marker3" />
+	<arg name="marker1_topic" default="sim/marker1" />
+	<arg name="intercept_topic" default="sim/intercepts_utm" />
+	<arg name="predicted_intercepts_topic" default="sim/predicted_intercepts" />
+
+
+
 
 	<node name="smarc_bt" pkg="smarc_bt" type="smarc_bt.py" output="screen" ns="$(arg robot_name)">
 		<param name="robot_name" value="$(arg robot_name)" />
@@ -113,5 +120,10 @@
 		<param name="lolo_elevon_strb_topic" value="$(arg lolo_elevon_strb_topic)" />
 		<param name="lolo_aft_tank_topic" value="$(arg lolo_aft_tank_topic)" />
 		<param name="lolo_front_tank_topic" value="$(arg lolo_front_tank_topic)" />
+
+		<param name="marker3_topic" value="$(arg marker3_topic)" />
+		<param name="marker1_topic" value="$(arg marker1_topic)" />
+		<param name="intercept_topic" value="$(arg intercept_topic)" />
+		<param name="predicted_intercepts_topic" value="$(arg predicted_intercepts_topic)" />
 	</node>
 </launch>

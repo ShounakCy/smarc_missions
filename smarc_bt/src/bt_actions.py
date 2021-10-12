@@ -34,7 +34,6 @@ import common_globals
 from mission_plan import MissionPlan
 from mission_log import MissionLog
 
-
 class A_ReadLolo(pt.behaviour.Behaviour):
     def __init__(self,
                  robot_name,
@@ -129,8 +128,6 @@ class A_ReadLolo(pt.behaviour.Behaviour):
         self.feedback_message = frame
         return pt.Status.SUCCESS
 
-
-
 class A_PublishFinalize(pt.behaviour.Behaviour):
     def __init__(self, topic):
         super(A_PublishFinalize, self).__init__(name="A_PublishFinalize")
@@ -169,9 +166,6 @@ class A_PublishFinalize(pt.behaviour.Behaviour):
                 return pt.Status.FAILURE
 
         return pt.Status.SUCCESS
-
-
-
 
 
 class A_ManualMissionLog(pt.behaviour.Behaviour):
@@ -233,10 +227,6 @@ class A_ManualMissionLog(pt.behaviour.Behaviour):
         self.feedback_message = "Log len:{} of log#{}".format(len(log.navigation_trace), self.started_logs)
 
         return pt.Status.SUCCESS
-
-
-
-
 
 
 class A_SaveMissionLog(pt.behaviour.Behaviour):
@@ -310,12 +300,6 @@ class A_UpdateMissionLog(pt.behaviour.Behaviour):
         return pt.Status.SUCCESS
 
 
-
-
-
-
-
-
 class A_SetDVLRunning(pt.behaviour.Behaviour):
     def __init__(self, dvl_on_off_service_name, running, cooldown):
         super(A_SetDVLRunning, self).__init__(name="A_SetDVLRunning")
@@ -361,7 +345,6 @@ class A_SetDVLRunning(pt.behaviour.Behaviour):
 
         rospy.logwarn_throttle_identical(5, "DVL COULD NOT BE TOGGLED:{}, ret:{}".format(self.sb.data, ret))
         return pt.Status.FAILURE
-
 
 
 class A_EmergencySurface(ptr.actions.ActionClient):
@@ -464,8 +447,6 @@ class A_EmergencySurface(ptr.actions.ActionClient):
         pass
 
 
-
-
 class A_SetNextPlanAction(pt.behaviour.Behaviour):
     def __init__(self, do_not_visit=False):
         """
@@ -500,7 +481,6 @@ class A_SetNextPlanAction(pt.behaviour.Behaviour):
         rospy.loginfo_throttle_identical(5, "Set CURRENT_PLAN_ACTION {} to: {}".format(self.do_not_visit, str(next_action)))
         self.bb.set(bb_enums.CURRENT_PLAN_ACTION, next_action)
         return pt.Status.SUCCESS
-
 
 
 class A_GotoWaypoint(ptr.actions.ActionClient):
@@ -687,6 +667,413 @@ class A_GotoWaypoint(ptr.actions.ActionClient):
         # self.feedback_message = "ETA:"+fb
         rospy.loginfo_throttle(5, fb)
 
+class A_GotoWaypoint_new(ptr.actions.ActionClient):
+    def __init__(self,
+                 action_namespace,
+                 goal_tf_frame = 'utm',
+                 node_name = "A_GotoWaypoint"):
+        """
+        Runs an action server that will move the robot to the given waypoint
+        """
+
+        self.bb = pt.blackboard.Blackboard()
+        self.node_name = node_name
+
+        list_of_maneuvers = self.bb.get(bb_enums.MANEUVER_ACTIONS)
+        if list_of_maneuvers is None:
+            list_of_maneuvers = [self.node_name]
+        else:
+            list_of_maneuvers.append(self.node_name)
+        self.bb.set(bb_enums.MANEUVER_ACTIONS, list_of_maneuvers)
+
+        self.action_goal_handle = None
+
+        # become action client
+        ptr.actions.ActionClient.__init__(
+            self,
+            name = self.node_name,
+            action_spec = GotoWaypointAction,
+            action_goal = None,
+            action_namespace = action_namespace,
+            override_feedback_message_on_running = "Moving to waypoint"
+        )
+
+        self.action_server_ok = False
+
+        self.goal_tf_frame = goal_tf_frame
+
+
+    def setup(self, timeout):
+        """
+        Overwriting the normal ptr action setup to stop it from failiing the setup step
+        and instead handling this failure in the tree.
+        """
+        self.logger.debug("%s.setup()" % self.__class__.__name__)
+        self.action_client = actionlib.SimpleActionClient(
+            self.action_namespace,
+            self.action_spec
+        )
+        if not self.action_client.wait_for_server(rospy.Duration(timeout)):
+            self.logger.error("{0}.setup() could not connect to the action server at '{1}'".format(self.__class__.__name__, self.action_namespace))
+            self.action_client = None
+        else:
+            self.action_server_ok = True
+
+
+        return True
+
+
+    def initialise(self):
+        if not self.action_server_ok:
+            rospy.logwarn_throttle(5, "No action server found for A_GotoWaypoint!")
+            return
+
+        mission_plan = self.bb.get(bb_enums.MISSION_PLAN_OBJ)
+        if mission_plan is None:
+            rospy.logwarn("No mission plan found!")
+            return
+
+        wp = mission_plan.get_current_wp()
+
+        if wp is None:
+            rospy.loginfo("No wp found to execute! Does the plan have any waypoints that we understand?")
+            return
+
+        if wp.tf_frame != self.goal_tf_frame:
+            rospy.logerr_throttle(5, 'The frame of the waypoint({0}) does not match the expected frame({1}) of the action client!'.format(frame, self.goal_tf_frame))
+            return
+
+        if wp.maneuver_imc_id != imc_enums.MANEUVER_GOTO:
+            rospy.loginfo("THIS IS A GOTO MANEUVER, WE ARE USING IT FOR SOMETHING ELSE")
+
+        # get the goal tolerance as a dynamic variable from the bb
+        goal_tolerance = self.bb.get(bb_enums.WAYPOINT_TOLERANCE)
+
+        # construct the message
+        goal = GotoWaypointGoal()
+        
+        goal_marker3 = self.bb.get(bb_enums.MARKER3)
+        rospy.loginfo('Marker 3  waypoint from Marker 3 of the action client ::::' +str(goal_marker3))
+
+        goal.waypoint_pose.pose.position.x = goal_marker3.point.x
+        goal.waypoint_pose.pose.position.y = goal_marker3.point.y
+        goal.goal_tolerance = goal_tolerance
+
+        # 0=None, 1=Depth, 2=Altitude in the action
+        # thankfully these are the same in IMC and in the Action
+        # but Action doesnt have 'height'
+        if wp.z_unit == imc_enums.Z_HEIGHT:
+            wp.z_unit = imc_enums.Z_NONE
+        goal.z_control_mode = wp.z_unit
+        goal.travel_depth = wp.z
+
+        # 0=None, 1=RPM, 2=speed in the action
+        # 0=speed, 1=rpm, 2=percentage in IMC
+        if wp.speed_unit == imc_enums.SPEED_UNIT_RPM:
+            goal.speed_control_mode = GotoWaypointGoal.SPEED_CONTROL_RPM
+            goal.travel_rpm = wp.speed
+        elif wp.speed_unit == imc_enums.SPEED_UNIT_MPS:
+            goal.speed_control_mode = GotoWaypointGoal.SPEED_CONTROL_SPEED
+            goal.travel_speed = wp.speed
+        else:
+            goal.speed_control_mode = GotoWaypointGoal.SPEED_CONTROL_NONE
+            rospy.logwarn_throttle(1, "Speed control of the waypoint action is NONE!")
+
+
+        self.action_goal = goal
+
+        rospy.loginfo(">>> Goto waypoint action goal initialized:"+str(goal))
+
+        # ensure that we still need to send the goal
+        self.sent_goal = False
+
+    def update(self):
+        """
+        Check only to see whether the underlying action server has
+        succeeded, is running, or has cancelled/aborted for some reason and
+        map these to the usual behaviour return states.
+        """
+
+        if not self.action_server_ok:
+            self.feedback_message = "Action Server for gotowp action can not be used!"
+            rospy.logerr_throttle_identical(5,self.feedback_message)
+            return pt.Status.FAILURE
+
+        # if your action client is not valid
+        if not self.action_client:
+            self.feedback_message = "ActionClient is invalid! Client:"+str(self.action_client)
+            rospy.logerr(self.feedback_message)
+            return pt.Status.FAILURE
+
+        # if the action_goal is invalid
+        if not self.action_goal:
+            self.feedback_message = "No action_goal!"
+            rospy.logwarn(self.feedback_message)
+            return pt.Status.FAILURE
+
+        # if goal hasn't been sent yet
+        if not self.sent_goal:
+            self.action_goal_handle = self.action_client.send_goal(self.action_goal, feedback_cb=self.feedback_cb)
+            self.sent_goal = True
+            rospy.loginfo("Sent goal to action server:"+str(self.action_goal))
+            self.feedback_message = "Goal sent"
+            return pt.Status.RUNNING
+
+
+        # if the goal was aborted or preempted
+        if self.action_client.get_state() in [actionlib_msgs.GoalStatus.ABORTED,
+                                              actionlib_msgs.GoalStatus.PREEMPTED]:
+            self.feedback_message = "Aborted goal"
+            rospy.loginfo(self.feedback_message)
+            return pt.Status.FAILURE
+
+        result = self.action_client.get_result()
+
+        # if the goal was accomplished
+        if result is not None and result.reached_waypoint:
+            self.feedback_message = "Completed goal"
+            rospy.loginfo(self.feedback_message)
+            return pt.Status.SUCCESS
+
+        # still running, set our feedback message to distance left
+        current_loc = self.bb.get(bb_enums.WORLD_TRANS)
+        mplan = self.bb.get(bb_enums.MISSION_PLAN_OBJ)
+        if mplan is not None and current_loc is not None:
+            wp = mplan.get_current_wp()
+            x,y = current_loc[:2]
+            h_dist = math.sqrt( (x-wp.x)**2 + (y-wp.y)**2 )
+            h_dist -= self.bb.get(bb_enums.WAYPOINT_TOLERANCE)
+            v_dist = wp.z - current_loc[2]
+            self.feedback_message = "HDist:{:.2f}, VDist:{:.2f} towards {}".format(h_dist, v_dist, wp.maneuver_name)
+
+
+
+        return pt.Status.RUNNING
+
+    def feedback_cb(self, msg):
+        fb = str(msg.ETA)
+        # self.feedback_message = "ETA:"+fb
+        rospy.loginfo_throttle(5, fb)
+
+class A_FollowWaypoint(ptr.actions.ActionClient):
+    def __init__(self,
+                 action_namespace,
+                 goal_tf_frame = 'utm',
+                 node_name = "A_FollowWaypoint"):
+        """
+        Runs an action server that will move the robot to the given waypoint
+        """
+
+        self.bb = pt.blackboard.Blackboard()
+        self.node_name = node_name
+
+        list_of_maneuvers = self.bb.get(bb_enums.MANEUVER_ACTIONS)
+        if list_of_maneuvers is None:
+            list_of_maneuvers = [self.node_name]
+        else:
+            list_of_maneuvers.append(self.node_name)
+        self.bb.set(bb_enums.MANEUVER_ACTIONS, list_of_maneuvers)
+
+        self.action_goal_handle = None
+
+        # become action client
+        ptr.actions.ActionClient.__init__(
+            self,
+            name = self.node_name,
+            action_spec = GotoWaypointAction,
+            action_goal = None,
+            action_namespace = action_namespace,
+            override_feedback_message_on_running = "Moving to follow waypoint"
+        )
+
+        self.action_server_ok = False
+
+        self.goal_tf_frame = goal_tf_frame
+
+
+    def setup(self, timeout):
+        """
+        Overwriting the normal ptr action setup to stop it from failiing the setup step
+        and instead handling this failure in the tree.
+        """
+        self.logger.debug("%s.setup()" % self.__class__.__name__)
+        self.action_client = actionlib.SimpleActionClient(
+            self.action_namespace,
+            self.action_spec
+        )
+        if not self.action_client.wait_for_server(rospy.Duration(timeout)):
+            self.logger.error("{0}.setup() could not connect to the action server at '{1}'".format(self.__class__.__name__, self.action_namespace))
+            self.action_client = None
+        else:
+            self.action_server_ok = True
+
+
+        return True
+
+
+    def initialise(self):
+        if not self.action_server_ok:
+            rospy.logwarn_throttle(5, "No action server found for A_GotoWaypoint!")
+            return
+
+        mission_plan = self.bb.get(bb_enums.MISSION_PLAN_OBJ)
+        if mission_plan is None:
+            rospy.logwarn("No mission plan found!")
+            return
+
+        wp = mission_plan.get_current_wp()
+
+        if wp is None:
+            rospy.loginfo("No wp found to execute! Does the plan have any waypoints that we understand?")
+            return
+
+        if wp.tf_frame != self.goal_tf_frame:
+            rospy.logerr_throttle(5, 'The frame of the waypoint({0}) does not match the expected frame({1}) of the action client!'.format(frame, self.goal_tf_frame))
+            return
+
+        if wp.maneuver_imc_id != imc_enums.MANEUVER_GOTO:
+            rospy.loginfo("THIS IS A GOTO MANEUVER, WE ARE USING IT FOR SOMETHING ELSE")
+
+        # get the goal tolerance as a dynamic variable from the bb
+        goal_tolerance = self.bb.get(bb_enums.WAYPOINT_TOLERANCE)
+
+        # construct the message
+        goal = GotoWaypointGoal()
+        
+        goal_marker1 = self.bb.get(bb_enums.MARKER1)
+        #goal_marker3 = self.bb.get(bb_enums.MARKER3)
+        rospy.loginfo('Marker 1  waypoint of the action client :' +str(goal_marker1))
+        #rospy.loginfo('Marker 3  waypoint of the action client :' +str(goal_marker3))
+
+        goal.waypoint_pose.pose.position.x = goal_marker1.point.x
+        goal.waypoint_pose.pose.position.y = goal_marker1.point.y
+        goal.goal_tolerance = goal_tolerance
+
+        # 0=None, 1=Depth, 2=Altitude in the action
+        # thankfully these are the same in IMC and in the Action
+        # but Action doesnt have 'height'
+        if wp.z_unit == imc_enums.Z_HEIGHT:
+            wp.z_unit = imc_enums.Z_NONE
+        goal.z_control_mode = wp.z_unit
+        goal.travel_depth = wp.z
+
+        # 0=None, 1=RPM, 2=speed in the action
+        # 0=speed, 1=rpm, 2=percentage in IMC
+        if wp.speed_unit == imc_enums.SPEED_UNIT_RPM:
+            goal.speed_control_mode = GotoWaypointGoal.SPEED_CONTROL_RPM
+            goal.travel_rpm = wp.speed
+        elif wp.speed_unit == imc_enums.SPEED_UNIT_MPS:
+            goal.speed_control_mode = GotoWaypointGoal.SPEED_CONTROL_SPEED
+            goal.travel_speed = wp.speed
+        else:
+            goal.speed_control_mode = GotoWaypointGoal.SPEED_CONTROL_NONE
+            rospy.logwarn_throttle(1, "Speed control of the waypoint action is NONE!")
+
+
+        self.action_goal = goal
+
+        rospy.loginfo(">>> Goto waypoint action goal initialized:"+str(goal))
+
+        # ensure that we still need to send the goal
+        self.sent_goal = False
+
+    def update(self):
+        """
+        Check only to see whether the underlying action server has
+        succeeded, is running, or has cancelled/aborted for some reason and
+        map these to the usual behaviour return states.
+        """
+
+        #goal_marker1 = self.bb.get(bb_enums.MARKER1)
+        goal_marker3 = self.bb.get(bb_enums.MARKER3)
+        intercept = self.bb.get(bb_enums.INTERCEPT)
+        predicted_intercepts = self.bb.get(bb_enums.PREDICTED_INTERCEPTS)
+        if not self.action_server_ok:
+            self.feedback_message = "Action Server for gotowp action can not be used!"
+            rospy.logerr_throttle_identical(5,self.feedback_message)
+            return pt.Status.FAILURE
+
+        # if your action client is not valid
+        if not self.action_client:
+            self.feedback_message = "ActionClient is invalid! Client:"+str(self.action_client)
+            rospy.logerr(self.feedback_message)
+            return pt.Status.FAILURE
+
+        # if the action_goal is invalid
+        if not self.action_goal:
+            self.feedback_message = "No action_goal!"
+            rospy.logwarn(self.feedback_message)
+            return pt.Status.FAILURE
+
+        #if goal hasn't been sent yet
+        # if not self.sent_goal:
+        #     self.action_goal_handle = self.action_client.send_goal(self.action_goal, feedback_cb=self.feedback_cb)
+        #     self.sent_goal = True
+        #     rospy.loginfo("Sent goal to action server:"+str(self.action_goal))
+        #     self.feedback_message = "Goal sent"
+        #     return pt.Status.RUNNING
+
+         
+            #goal_marker3 = self.bb.get(bb_enums.MARKER3)
+        if intercept == None :
+            self.action_goal_handle = self.action_client.send_goal(self.action_goal, feedback_cb=self.feedback_cb)
+            self.sent_goal = True
+            rospy.loginfo("Sent Marker 1 goal to action server:::::::::::::::"+str(self.action_goal))
+            self.feedback_message = "Follow Goal sent"
+        
+        elif predicted_intercepts is not None :
+            self.action_goal.waypoint_pose.pose.position.x = predicted_intercepts.point.x
+            self.action_goal.waypoint_pose.pose.position.y = predicted_intercepts.point.y
+            self.action_goal_handle = self.action_client.send_goal(self.action_goal, feedback_cb=self.feedback_cb)
+            self.sent_goal = True
+            rospy.loginfo("Sent PREDICTED INTERCEPT goal to action server:::::::::::::::"+str(self.action_goal))
+            self.feedback_message = "Follow Goal sent"
+
+        elif intercept is not None and (self.action_goal.waypoint_pose.pose.position.y is not intercept.point.y) :
+            self.action_goal.waypoint_pose.pose.position.x = intercept.point.x
+            self.action_goal.waypoint_pose.pose.position.y = intercept.point.y
+            self.action_goal_handle = self.action_client.send_goal(self.action_goal, feedback_cb=self.feedback_cb)
+            self.sent_goal = True
+            rospy.loginfo("Sent INTERCEPT goal to action server:::::::::::::::"+str(self.action_goal))
+            self.feedback_message = "Follow Goal sent"
+
+
+        # if the goal was aborted or preempted
+        if self.action_client.get_state() in [actionlib_msgs.GoalStatus.ABORTED,
+                                              actionlib_msgs.GoalStatus.PREEMPTED]:
+            self.feedback_message = "Aborted goal"
+            rospy.loginfo(self.feedback_message)
+            return pt.Status.FAILURE
+
+        result = self.action_client.get_result()
+
+        # if the goal was accomplished
+        if result is not None and result.reached_waypoint:
+            self.feedback_message = "Completed goal"
+            rospy.loginfo(self.feedback_message)
+            return pt.Status.SUCCESS
+
+        # still running, set our feedback message to distance left
+        current_loc = self.bb.get(bb_enums.WORLD_TRANS)
+        mplan = self.bb.get(bb_enums.MISSION_PLAN_OBJ)
+        if mplan is not None and current_loc is not None:
+            wp = mplan.get_current_wp()
+            x,y = current_loc[:2]
+            h_dist = math.sqrt( (x-wp.x)**2 + (y-wp.y)**2 )
+            h_dist -= self.bb.get(bb_enums.WAYPOINT_TOLERANCE)
+            v_dist = wp.z - current_loc[2]
+            self.feedback_message = "HDist:{:.2f}, VDist:{:.2f} towards {}".format(h_dist, v_dist, wp.maneuver_name)
+
+
+
+        return pt.Status.RUNNING
+
+    def feedback_cb(self, msg):
+        fb = str(msg.ETA)
+        # self.feedback_message = "ETA:"+fb
+        rospy.loginfo_throttle(5, fb)
+
+
 
 
 class A_UpdateTF(pt.behaviour.Behaviour):
@@ -755,8 +1142,6 @@ class A_UpdateTF(pt.behaviour.Behaviour):
 
 
         return pt.Status.SUCCESS
-
-
 
 
 class A_UpdateNeptusPlanControl(pt.behaviour.Behaviour):
@@ -837,8 +1222,6 @@ class A_UpdateNeptusPlanControl(pt.behaviour.Behaviour):
         # reset it until next message
         self.plan_control_msg = None
         return pt.Status.SUCCESS
-
-
 
 class A_UpdateNeptusEstimatedState(pt.behaviour.Behaviour):
     def __init__(self,
@@ -1500,4 +1883,358 @@ class A_ReadBuoys(pt.behaviour.Behaviour):
 
         # put the buoy positions in the blackboard
         self.bb.set(bb_enums.BUOYS, self.buoys)
+        return pt.Status.SUCCESS
+
+
+class A_ReadMarker3(pt.behaviour.Behaviour):
+    
+    '''
+    This action reads the marker 3
+     from the rostopic.
+    '''
+
+    def __init__(
+        self,
+        topic_name,
+        buoy_link,
+        utm_link,
+        latlon_utm_serv,
+    ):
+
+        # rostopic name and type (e.g. marker array)
+        self.topic_name = topic_name
+
+        # frame IDs for TF
+        self.buoy_link = buoy_link
+        self.utm_link = utm_link
+
+        # lat/lon to utm service
+        self.latlon_utm_serv = latlon_utm_serv
+
+        # blackboard for info
+        self.bb = pt.blackboard.Blackboard()
+
+        # become a behaviour
+        pt.behaviour.Behaviour.__init__(
+            self,
+            name="A_ReadMarker3"
+        )
+
+        # for coordinate frame transformations
+        self.tf_listener = tf.TransformListener()
+
+    def setup(self, timeout):
+
+        # wait for TF transformation
+        try:
+            rospy.loginfo('Waiting for transform from {} to {}.'.format(
+                self.buoy_link,
+                self.utm_link
+            ))
+            self.tf_listener.waitForTransform(
+                self.buoy_link,
+                self.utm_link,
+                rospy.Time(),
+                rospy.Duration(timeout)
+            )
+        except:
+            rospy.loginfo('Transform from {} to {} not found.'.format(
+                self.buoy_link,
+                self.utm_link
+            ))
+
+        # subscribe to buoy positions
+        self.sub = rospy.Subscriber(
+            self.topic_name,
+            PointStamped,
+            callback=self.cb,
+            queue_size=10
+        )
+        # self.bb.set(bb_enums.INTERCEPT_POINTS, None)
+        self.marker3 = None
+        return True
+
+    def cb(self, msg):
+
+        '''
+        
+        For now, it just read the simulator intercepts.
+        The intercepts here are assumed to be in the map frame.
+        '''
+
+       
+        # rospy.loginfo('hello')
+        
+        self.marker3 = msg
+
+        
+
+    def update(self):
+
+        # put the intercept positions in the blackboard
+        self.bb.set(bb_enums.MARKER3, self.marker3)
+        return pt.Status.SUCCESS
+
+class A_ReadMarker1(pt.behaviour.Behaviour):
+    
+    '''
+    This action reads the marker 1
+     from the rostopic.
+    '''
+
+    def __init__(
+        self,
+        topic_name,
+        buoy_link,
+        utm_link,
+        latlon_utm_serv,
+    ):
+
+        # rostopic name and type (e.g. marker array)
+        self.topic_name = topic_name
+
+        # frame IDs for TF
+        self.buoy_link = buoy_link
+        self.utm_link = utm_link
+
+        # lat/lon to utm service
+        self.latlon_utm_serv = latlon_utm_serv
+
+        # blackboard for info
+        self.bb = pt.blackboard.Blackboard()
+
+        # become a behaviour
+        pt.behaviour.Behaviour.__init__(
+            self,
+            name="A_ReadMarker1"
+        )
+
+        # for coordinate frame transformations
+        self.tf_listener = tf.TransformListener()
+
+    def setup(self, timeout):
+
+        # wait for TF transformation
+        try:
+            rospy.loginfo('Waiting for transform from {} to {}.'.format(
+                self.buoy_link,
+                self.utm_link
+            ))
+            self.tf_listener.waitForTransform(
+                self.buoy_link,
+                self.utm_link,
+                rospy.Time(),
+                rospy.Duration(timeout)
+            )
+        except:
+            rospy.loginfo('Transform from {} to {} not found.'.format(
+                self.buoy_link,
+                self.utm_link
+            ))
+
+        # subscribe to buoy positions
+        self.sub = rospy.Subscriber(
+            self.topic_name,
+            PointStamped,
+            callback=self.cb,
+            queue_size=10
+        )
+        # self.bb.set(bb_enums.INTERCEPT_POINTS, None)
+        self.marker1 = None
+        return True
+
+    def cb(self, msg):
+
+        '''
+        
+        For now, it just read the simulator intercepts.
+        The intercepts here are assumed to be in the map frame.
+        '''
+    
+        # rospy.loginfo('hello')
+        
+        self.marker1 = msg 
+
+    def update(self):
+
+        # put the intercept positions in the blackboard
+        self.bb.set(bb_enums.MARKER1, self.marker1)
+        return pt.Status.SUCCESS
+
+class A_ReadIntercepts(pt.behaviour.Behaviour):
+    
+    '''
+    This action reads the intercepts
+     from the rostopic.
+    '''
+
+    def __init__(
+        self,
+        topic_name,
+        buoy_link,
+        utm_link,
+        latlon_utm_serv,
+    ):
+
+        # rostopic name and type (e.g. marker array)
+        self.topic_name = topic_name
+
+        # frame IDs for TF
+        self.buoy_link = buoy_link
+        self.utm_link = utm_link
+
+        # lat/lon to utm service
+        self.latlon_utm_serv = latlon_utm_serv
+
+        # blackboard for info
+        self.bb = pt.blackboard.Blackboard()
+
+        # become a behaviour
+        pt.behaviour.Behaviour.__init__(
+            self,
+            name="A_ReadIntercepts"
+        )
+
+        # for coordinate frame transformations
+        self.tf_listener = tf.TransformListener()
+
+    def setup(self, timeout):
+
+        # wait for TF transformation
+        try:
+            rospy.loginfo('Waiting for transform from {} to {}.'.format(
+                self.buoy_link,
+                self.utm_link
+            ))
+            self.tf_listener.waitForTransform(
+                self.buoy_link,
+                self.utm_link,
+                rospy.Time(),
+                rospy.Duration(timeout)
+            )
+        except:
+            rospy.loginfo('Transform from {} to {} not found.'.format(
+                self.buoy_link,
+                self.utm_link
+            ))
+
+        # subscribe to intecept positions
+        self.sub = rospy.Subscriber(
+            self.topic_name,
+            PointStamped,
+            callback=self.cb,
+            queue_size=10
+        )
+        # self.bb.set(bb_enums.INTERCEPT, None)
+        self.intercept = None
+        return True
+
+    def cb(self, msg):
+
+        '''
+        
+        For now, it just read the simulator intercepts.
+        The intercepts here are assumed to be in the map frame.
+        '''
+
+       
+        # rospy.loginfo('hello')
+        
+        self.intercept = msg
+
+        
+
+    def update(self):
+
+        # put the intercept positions in the blackboard
+        self.bb.set(bb_enums.INTERCEPT, self.intercept)
+        return pt.Status.SUCCESS
+
+class A_ReadPredictedIntercepts(pt.behaviour.Behaviour):
+    
+    '''
+    This action reads the predicted intercepts
+     from the rostopic.
+    '''
+
+    def __init__(
+        self,
+        topic_name,
+        buoy_link,
+        utm_link,
+        latlon_utm_serv,
+    ):
+
+        # rostopic name and type (e.g. marker array)
+        self.topic_name = topic_name
+
+        # frame IDs for TF
+        self.buoy_link = buoy_link
+        self.utm_link = utm_link
+
+        # lat/lon to utm service
+        self.latlon_utm_serv = latlon_utm_serv
+
+        # blackboard for info
+        self.bb = pt.blackboard.Blackboard()
+
+        # become a behaviour
+        pt.behaviour.Behaviour.__init__(
+            self,
+            name="A_ReadPredictedIntercepts"
+        )
+
+        # for coordinate frame transformations
+        self.tf_listener = tf.TransformListener()
+
+    def setup(self, timeout):
+
+        # wait for TF transformation
+        try:
+            rospy.loginfo('Waiting for transform from {} to {}.'.format(
+                self.buoy_link,
+                self.utm_link
+            ))
+            self.tf_listener.waitForTransform(
+                self.buoy_link,
+                self.utm_link,
+                rospy.Time(),
+                rospy.Duration(timeout)
+            )
+        except:
+            rospy.loginfo('Transform from {} to {} not found.'.format(
+                self.buoy_link,
+                self.utm_link
+            ))
+
+        # subscribe to intecept positions
+        self.sub = rospy.Subscriber(
+            self.topic_name,
+            PointStamped,
+            callback=self.cb,
+            queue_size=10
+        )
+        # self.bb.set(bb_enums.PREDICTED_INTERCEPTS, None)
+        self.predicted_intercepts = None
+        return True
+
+    def cb(self, msg):
+
+        '''
+        
+        For now, it just read the simulator intercepts.
+        The intercepts here are assumed to be in the map frame.
+        '''
+
+       
+        # rospy.loginfo('hello')
+        
+        self.predicted_intercepts= msg
+
+        
+
+    def update(self):
+
+        # put the intercept positions in the blackboard
+        self.bb.set(bb_enums.PREDICTED_INTERCEPTS, self.predicted_intercepts)
         return pt.Status.SUCCESS

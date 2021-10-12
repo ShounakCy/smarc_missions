@@ -92,6 +92,12 @@ class AUVConfig(object):
         # Algae farm
         self.BUOY_TOPIC = 'sim/marked_positions'
 
+        #buoy3 positions and intercepts
+        self.MARKER3_TOPIC = 'sim/marker3'
+        self.MARKER1_TOPIC = 'sim/marker1'
+        self.INTERCEPT_TOPIC = 'sim/intercepts_utm'
+        self.PREDICTED_INTERCEPTS_TOPIC = 'sim/predicted_intercepts'
+
         # Mission logging file location
         self.MISSION_LOG_FOLDER = '~/MissionLogs/'
         self.ENABLE_MANUAL_MISSION_LOG = False

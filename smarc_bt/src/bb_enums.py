@@ -56,6 +56,10 @@ LOCALIZATION_ERROR_GROWTH = 'loc_err_growth'
 
 # Algae farm
 BUOYS = 'buoys'
+MARKER3 = 'marker3'
+MARKER1 = 'marker1'
+INTERCEPT = 'intercept'
+PREDICTED_INTERCEPTS = 'predicted_intercepts'
 
 
 # Goto action

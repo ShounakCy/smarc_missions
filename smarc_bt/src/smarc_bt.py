@@ -56,7 +56,7 @@ from bt_common import Sequence, \
                       Counter, \
                       Not
 
-from bt_actions import A_GotoWaypoint, \
+from bt_actions import  A_GotoWaypoint, \
                        A_SetNextPlanAction, \
                        A_UpdateTF, \
                        A_EmergencySurface, \
@@ -74,7 +74,12 @@ from bt_actions import A_GotoWaypoint, \
                        A_SaveMissionLog, \
                        A_ManualMissionLog, \
                        A_PublishFinalize, \
-                       A_ReadLolo
+                       A_ReadLolo, \
+                       A_ReadMarker3, \
+                       A_ReadMarker1, \
+                       A_ReadIntercepts, \
+                       A_ReadPredictedIntercepts, \
+                       A_FollowWaypoint
 
 
 
@@ -103,6 +108,8 @@ def const_tree(auv_config):
     bb.set(bb_enums.ROBOT_NAME, auv_config.robot_name)
 
     def const_data_ingestion_tree():
+
+
         read_abort = ptr.subscribers.EventToBlackboard(
             name = "A_ReadAbort",
             topic_name = auv_config.ABORT_TOPIC,
@@ -188,8 +195,36 @@ def const_tree(auv_config):
             elevon_port_topic = auv_config.LOLO_ELEVON_PORT_TOPIC,
             elevon_strb_topic = auv_config.LOLO_ELEVON_STRB_TOPIC,
             aft_tank_topic = auv_config.LOLO_AFT_TANK_TOPIC,
-            front_tank_topic = auv_config.LOLO_FRONT_TANK_TOPIC)
+            front_tank_topic = auv_config.LOLO_FRONT_TANK_TOPIC
+            )
 
+        read_marker3 = A_ReadMarker3(
+            topic_name=auv_config.MARKER3_TOPIC,
+            buoy_link=auv_config.LOCAL_LINK,
+            utm_link=auv_config.UTM_LINK,
+            latlon_utm_serv=auv_config.LATLONTOUTM_SERVICE
+        )
+
+        read_marker1 = A_ReadMarker1(
+            topic_name=auv_config.MARKER1_TOPIC,
+            buoy_link=auv_config.LOCAL_LINK,
+            utm_link=auv_config.UTM_LINK,
+            latlon_utm_serv=auv_config.LATLONTOUTM_SERVICE
+        )
+
+        read_intercepts = A_ReadIntercepts(
+            topic_name=auv_config.INTERCEPT_TOPIC,
+            buoy_link=auv_config.LOCAL_LINK,
+            utm_link=auv_config.UTM_LINK,
+            latlon_utm_serv=auv_config.LATLONTOUTM_SERVICE
+        )
+
+        read_predicted_intercepts = A_ReadPredictedIntercepts(
+            topic_name=auv_config.PREDICTED_INTERCEPTS_TOPIC,
+            buoy_link=auv_config.LOCAL_LINK,
+            utm_link=auv_config.UTM_LINK,
+            latlon_utm_serv=auv_config.LATLONTOUTM_SERVICE
+        )
 
         def const_neptus_tree():
             update_neptus = Sequence(name="SQ-UpdateNeptus",
@@ -233,7 +268,11 @@ def const_tree(auv_config):
                             read_lolo,
                             update_tf,
                             neptus_tree,
-                            publish_heartbeat
+                            publish_heartbeat,
+                            read_marker3,
+                            read_marker1,
+                            read_intercepts,
+                            read_predicted_intercepts
                         ])
 
 
@@ -362,7 +401,7 @@ def const_tree(auv_config):
 
         # SAMPLE
         #XXX USING THE GOTO ACTION HERE TOO UNTIL WE HAVE A SAMPLE ACTION
-        sample_action = A_GotoWaypoint(action_namespace = auv_config.ACTION_NAMESPACE,
+        sample_action = A_FollowWaypoint(action_namespace = auv_config.ACTION_NAMESPACE,
                                        goal_tf_frame = auv_config.UTM_LINK)
         wp_is_sample = C_CheckWaypointType(expected_wp_type = imc_enums.MANEUVER_SAMPLE)
         sample_maneuver = Sequence(name="SQ-SampleWaypoint",
@@ -460,6 +499,7 @@ def const_tree(auv_config):
     run_tree = Fallback(name="FB-Run",
                         children=[
                             # finalized,
+
                             const_finalize_mission(),
                             planned_mission
                             #  const_leader_follower()
@@ -468,6 +508,7 @@ def const_tree(auv_config):
     manual_logging = A_ManualMissionLog(latlontoutm_service_name = auv_config.LATLONTOUTM_SERVICE,
                                         latlontoutm_service_name_alternative = auv_config.LATLONTOUTM_SERVICE_ALTERNATIVE)
 
+     
 
     root = Sequence(name='SQ-ROOT',
                     children=[
@@ -475,6 +516,7 @@ def const_tree(auv_config):
                               manual_logging,
                               const_safety_tree(),
                              # const_dvl_tree(),
+                              
                               run_tree
                     ])
 

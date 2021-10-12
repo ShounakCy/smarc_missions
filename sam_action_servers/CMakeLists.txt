@@ -63,11 +63,6 @@ find_package(catkin REQUIRED COMPONENTS
 #   Message1.msg
 #   Message2.msg
 # )
-## Generate messages in the 'msg' folder
-add_message_files(
-  FILES
-  line.msg
-)
 
 ## Generate services in the 'srv' folder
 # add_service_files(
@@ -88,11 +83,6 @@ add_message_files(
 #   DEPENDENCIES
 #   geometry_msgs#   nav_msgs#   std_msgs#   uuv_gazebo_ros_plugins_msgs
 # )
-generate_messages(
-  DEPENDENCIES
-#   geometry_msgs#   nav_msgs#   std_msgs#   vision_msgs#   visualization_msgs
-std_msgs
-)
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##
@@ -128,8 +118,6 @@ catkin_package(
 #  LIBRARIES bezier_planner
 #  CATKIN_DEPENDS geometry_msgs nav_msgs std_msgs uuv_gazebo_ros_plugins_msgs
 #  DEPENDS system_lib
-CATKIN_DEPENDS message_runtime
-
 )
 
 ###########
