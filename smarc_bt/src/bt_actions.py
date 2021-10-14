@@ -946,7 +946,7 @@ class A_FollowWaypoint(ptr.actions.ActionClient):
         #rospy.loginfo('Marker 3  waypoint of the action client :' +str(goal_marker3))
 
         goal.waypoint_pose.pose.position.x = goal_marker1.point.x
-        goal.waypoint_pose.pose.position.y = goal_marker1.point.y
+        goal.waypoint_pose.pose.position.y = goal_marker1.point.y+10.0
         goal.goal_tolerance = goal_tolerance
 
         # 0=None, 1=Depth, 2=Altitude in the action
